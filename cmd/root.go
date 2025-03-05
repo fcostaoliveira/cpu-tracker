@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"sort"
 	"sync"
 	"time"
@@ -76,18 +77,23 @@ func getProcessCPU(p *process.Process) (float64, float64) {
 	return times.User, times.System
 }
 
-func findProcessByName(name string) (*process.Process, error) {
+func findProcessByName(pattern string) (*process.Process, error) {
 	procs, err := process.Processes()
 	if err != nil {
 		return nil, err
 	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("invalid regex pattern: %w", err)
+	}
+
 	for _, p := range procs {
 		procName, _ := p.Name()
-		if procName == name {
+		if re.MatchString(procName) {
 			return p, nil
 		}
 	}
-	return nil, fmt.Errorf("process not found")
+	return nil, fmt.Errorf("process matching pattern '%s' not found", pattern)
 }
 
 func calculateStatistics(data []float64) (median, p95, p99 float64) {
@@ -123,7 +129,7 @@ func startTracking(w http.ResponseWriter, r *http.Request) {
 }
 
 func stopTrackingHandler(w http.ResponseWriter, r *http.Request) {
-	processName := r.URL.Path[len("/stop/"):]
+	processName := r.URL.Path[len("/stop/pgrep/"):]
 	if processName == "" {
 		response := stopAllTracking()
 		json.NewEncoder(w).Encode(response)
@@ -141,7 +147,6 @@ func stopTracking(processName string) map[string]interface{} {
 		return map[string]interface{}{"error": "Tracking is not active for " + processName}
 	}
 	median, p95, p99 := calculateStatistics(tracker.CPUUsage)
-	_ = tracker.Process.Kill()
 	delete(trackers, processName)
 	return map[string]interface{}{
 		"message":     "Stopped process " + processName,
